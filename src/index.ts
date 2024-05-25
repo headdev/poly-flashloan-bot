@@ -1,13 +1,21 @@
 import { config as dotEnvConfig } from "dotenv";
 dotEnvConfig();
-import { interval, explorerURL, diffPercentage } from "./config";
+import { interval, explorerURL, diffPercentage, tradingRoutes } from "./config";
 import { flashloan } from "./flashloan";
-import { checkIfProfitable, getBigNumber } from "./utils";
+import {
+  checkIfProfitable,
+  getBigNumber,
+  findRouterFromProtocol,
+} from "./utils";
 import { ethers } from "ethers";
 import { flashloanTable, priceTable } from "./consoleUI/table";
 import * as log4js from "log4js";
 import { findOpp } from "./findOpp";
-import { findTriangularArbitrageOpportunities } from "../src/triangularArbitrage";
+import { findTriangularArbitrageRoutes } from "./triangularArbitrage";
+import { IToken } from "./constants/addresses";
+import { getUniswapV3PoolFee } from "./price/uniswap/v3/fee";
+import { getPriceOnUniV2 } from "./price/uniswap/v2/getPrice";
+import { getPriceOnUniV3 } from "./price/uniswap/v3/getPrice";
 
 log4js.configure({
   appenders: {
@@ -26,67 +34,107 @@ const errReport = log4js.getLogger("error");
 export const main = async () => {
   let isFlashLoaning = false;
 
-  const func = async () => {
-    try {
-      const triangularArbitrageOpportunities =
-        await findTriangularArbitrageOpportunities();
+  tradingRoutes.forEach(async (trade) => {
+    const baseToken = trade.path[0];
 
-      for (const opportunity of triangularArbitrageOpportunities) {
-        const { trade, expectedProfit } = opportunity;
-        const baseToken = trade.path[0];
-        const bnLoanAmount = trade.amountIn;
-        const bnExpectedAmountOut = expectedProfit.add(bnLoanAmount);
+    const func = async () => {
+      const bnLoanAmount = trade.amountIn;
+      let bnExpectedAmountOut = await findOpp(trade);
 
-        const isProfitable = checkIfProfitable(
-          bnLoanAmount,
-          diffPercentage,
-          bnExpectedAmountOut
-        );
+      const triangularArbitrageRoutes = findTriangularArbitrageRoutes(
+        trade.path,
+        []
+      );
 
-        console.log("isProfitable", isProfitable);
+      for (const route of triangularArbitrageRoutes) {
+        let amountOut = trade.amountIn;
+        for (const hop of route.hops) {
+          const tokenIn = hop.path[0];
+          const tokenOut = hop.path[1];
+          const exchange = hop.protocol;
 
-        if (isProfitable && !isFlashLoaning) {
-          isFlashLoaning = true;
-
-          try {
-            const tx = await flashloan(trade);
-            const stDifference = Number(
-              ethers.utils.formatUnits(
-                bnExpectedAmountOut.sub(bnLoanAmount),
-                baseToken.decimals
-              )
-            ).toFixed(4);
-            const amount = Number(
-              ethers.utils.formatUnits(bnExpectedAmountOut, baseToken.decimals)
-            ).toFixed(4);
-            const loanAmount = Number(
-              ethers.utils.formatUnits(bnLoanAmount, baseToken.decimals)
-            );
-            const difference = Number(stDifference);
-            const percentage = Number(
-              ((difference / loanAmount) * 100).toFixed(2)
-            );
-            const path = trade.path.map((token) => {
-              return token.symbol;
-            });
-
-            logger.info("path", path, "protocols", trade.protocols);
-            logger.info({ amount, difference, percentage });
-            logger.info(`Explorer URL: ${explorerURL}/tx/${tx.hash}`);
-          } catch (e) {
-            errReport.error(e);
-          } finally {
-            isFlashLoaning = false;
+          switch (exchange) {
+            // Uniswap V3
+            case 0:
+              try {
+                const fee = getUniswapV3PoolFee([tokenIn, tokenOut]);
+                amountOut = await getPriceOnUniV3(tokenIn, tokenOut, amountOut);
+                break;
+              } catch (e) {
+                errReport.warn(e);
+                amountOut = getBigNumber(0);
+                break;
+              }
+            // Uniswap V2
+            default:
+              try {
+                amountOut = await getPriceOnUniV2(
+                  tokenIn,
+                  tokenOut,
+                  amountOut,
+                  findRouterFromProtocol(exchange)
+                );
+                break;
+              } catch (e) {
+                errReport.warn(e);
+                amountOut = getBigNumber(0);
+                break;
+              }
           }
         }
-      }
-    } catch (e) {
-      errReport.error(e);
-    }
-  };
 
-  func();
-  setInterval(func, interval);
+        if (amountOut.gt(bnExpectedAmountOut)) {
+          bnExpectedAmountOut = amountOut;
+        }
+      }
+
+      const isProfitable = checkIfProfitable(
+        bnLoanAmount,
+        diffPercentage,
+        bnExpectedAmountOut
+      );
+
+      console.log("isProfitable", isProfitable);
+
+      if (isProfitable && !isFlashLoaning) {
+        isFlashLoaning = true;
+
+        try {
+          const tx = await flashloan(trade);
+          const stDifference = Number(
+            ethers.utils.formatUnits(
+              bnExpectedAmountOut.sub(bnLoanAmount),
+              baseToken.decimals
+            )
+          ).toFixed(4);
+          const amount = Number(
+            ethers.utils.formatUnits(bnExpectedAmountOut, baseToken.decimals)
+          ).toFixed(4);
+          const loanAmount = Number(
+            ethers.utils.formatUnits(bnLoanAmount, baseToken.decimals)
+          );
+          const difference = Number(stDifference);
+          const percentage = Number(
+            ((difference / loanAmount) * 100).toFixed(2)
+          );
+          const path = trade.path.map((token) => {
+            return token.symbol;
+          });
+
+          logger.info("path", path, "protocols", trade.protocols);
+          logger.info({ amount, difference, percentage });
+          logger.info(`Explorer URL: ${explorerURL}/tx/${tx.hash}`);
+        } catch (e) {
+          errReport.error(e);
+        } finally {
+          isFlashLoaning = false;
+        }
+      }
+    };
+
+    func();
+    setInterval(func, interval);
+  });
 };
 
 main().catch((error) => {
