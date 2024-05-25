@@ -1,9 +1,10 @@
 import { ethers } from "ethers";
-import { IToken } from "./constants/addresses";
-import { Hop, IFlashloanRoute } from "./interfaces/main";
-import { ITrade } from "./interfaces/trade";
-import { getUniswapV3PoolFee } from "./price/uniswap/v3/fee";
-import { findRouterFromProtocol } from "./utils";
+import { IToken } from "../src/constants/addresses";
+import { Hop, IFlashloanRoute } from "../src/interfaces/main";
+import { ITrade } from "../src/interfaces/trade";
+import { getUniswapV3PoolFee } from "../src/price/uniswap/v3/fee";
+import { findRouterFromProtocol } from "../src//utils";
+import { findTriangularArbitrageRoutes } from "./triangularArbitrage";
 
 const getDataBytesForProtocol = (
   tokenIn: IToken,
@@ -11,7 +12,7 @@ const getDataBytesForProtocol = (
   protocol: number
 ) => {
   switch (protocol) {
-    // uniswap V3
+    // Uniswap V3
     case 0:
       return ethers.utils.defaultAbiCoder.encode(
         ["address", "uint24"],
@@ -20,7 +21,7 @@ const getDataBytesForProtocol = (
           getUniswapV3PoolFee([tokenIn.address, tokenOut.address]),
         ]
       );
-    // uniswap V2
+    // Uniswap V2
     default:
       return ethers.utils.defaultAbiCoder.encode(
         ["address"],
@@ -30,6 +31,7 @@ const getDataBytesForProtocol = (
 };
 
 export const passRoutes = (trade: ITrade): IFlashloanRoute[] => {
+  const linearRoutes: IFlashloanRoute[] = [];
   let hops: Hop[] = [];
   trade.protocols.forEach((protocol, i) => {
     const tokenIn = trade.path[i];
@@ -41,10 +43,15 @@ export const passRoutes = (trade: ITrade): IFlashloanRoute[] => {
     };
     hops.push(hop);
   });
-  return [
-    {
-      hops: hops,
-      part: 10000,
-    },
-  ];
+  linearRoutes.push({
+    hops: hops,
+    part: 10000,
+  });
+
+  const triangularArbitrageRoutes = findTriangularArbitrageRoutes(
+    trade.path,
+    []
+  );
+
+  return [...linearRoutes, ...triangularArbitrageRoutes];
 };

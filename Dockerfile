@@ -1,6 +1,7 @@
-FROM node:16.14
+FROM node:18.12.0
 
 WORKDIR /app
+RUN mkdir -p log && chmod 777 log
 
 ENV NODE_ENV production
 
@@ -12,5 +13,6 @@ RUN yarn install
 COPY . ./
 RUN yarn build
 
-CMD [ "node", "dist/index.js" ]
+CMD [ "node", "dist/simulator.js" ]
 USER node
+ENV YARN_IGNORE_NODE=1

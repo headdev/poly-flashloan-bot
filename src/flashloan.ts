@@ -6,6 +6,8 @@ import { IParams } from "./interfaces/main";
 import { ITrade } from "./interfaces/trade";
 import { passRoutes } from "./routes";
 
+require("dotenv").config();
+
 const maticProvider = new ethers.providers.JsonRpcProvider(
   process.env.ALCHEMY_POLYGON_RPC_URL
 );

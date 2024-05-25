@@ -6,7 +6,7 @@
   "author": "yuichiroaoki",
   "license": "MIT",
   "scripts": {
-    "server": "nodemon src/index.ts",
+    "server": "nodemon src/simulator.ts",
     "start": "node dist/index.js",
     "test": "jest",
     "build": "tsc",
@@ -31,13 +31,13 @@
     "@types/node": "latest",
     "axios": "latest",
     "console-table-printer": "latest",
-    "dotenv": "latest",
+    "dotenv": "^16.4.5",
     "ethers": "^5.5.3",
     "log4js": "^6.4.6",
     "ts-node": "latest",
     "typescript": "latest"
   },
-  "packageManager": "yarn@3.2.1",
+  "packageManager": "yarn@4.2.2",
   "lint-staged": {
     "*.{js,json,md,sol,ts}": [
       "prettier --config .prettierrc.json --write --ignore-unknown"
